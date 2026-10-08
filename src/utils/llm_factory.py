@@ -47,10 +47,28 @@ def get_llm(provider: str = None, temperature: float = 0.0):
 
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(
+        from langchain_core.messages import AIMessage
+
+        class CleanChatGoogleGenerativeAI(ChatGoogleGenerativeAI):
+            def _clean_res(self, res):
+                for gen in res.generations:
+                    if isinstance(gen.message, AIMessage) and isinstance(gen.message.content, list):
+                        texts = [item.get('text', '') for item in gen.message.content if isinstance(item, dict) and 'text' in item]
+                        gen.message.content = ''.join(texts)
+                        gen.text = gen.message.content
+                return res
+
+            def _generate(self, *args, **kwargs):
+                return self._clean_res(super()._generate(*args, **kwargs))
+
+            async def _agenerate(self, *args, **kwargs):
+                return self._clean_res(await super()._agenerate(*args, **kwargs))
+
+        return CleanChatGoogleGenerativeAI(
             model=config.GEMINI_MODEL,
             google_api_key=config.GOOGLE_API_KEY,
             temperature=temperature,
+            max_retries=6,
         )
 
     elif provider == "anthropic":

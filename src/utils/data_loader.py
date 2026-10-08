@@ -53,6 +53,7 @@ def split_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> lis
 def build_vectorstore(chunks: list, embeddings):
     """
     Tạo FAISS vectorstore từ danh sách chunks và embeddings.
+    Tự động batching và cache để tránh rate limit.
 
     Args:
         chunks    : list[str] — danh sách text chunks đã chia
@@ -61,9 +62,33 @@ def build_vectorstore(chunks: list, embeddings):
     Returns:
         FAISS vectorstore đã được index và sẵn sàng dùng để retrieve
     """
+    import time
     from langchain_community.vectorstores import FAISS
 
+    index_path = Path(__file__).parent.parent.parent / "data" / "faiss_index"
+    if index_path.exists():
+        try:
+            print("📦 Đang tải FAISS index từ cache...")
+            return FAISS.load_local(str(index_path), embeddings, allow_dangerous_deserialization=True)
+        except Exception as e:
+            print(f"ℹ️  Không tải được cache ({e}), tạo mới FAISS index...")
+
     print(f"🔨 Đang tạo FAISS index từ {len(chunks)} chunks ...")
-    vectorstore = FAISS.from_texts(chunks, embeddings)
+    batch_size = 25
+    vectorstore = None
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i + batch_size]
+        if vectorstore is None:
+            vectorstore = FAISS.from_texts(batch, embeddings)
+        else:
+            vectorstore.add_texts(batch)
+        if i + batch_size < len(chunks):
+            time.sleep(1.5)
+
     print("✅ FAISS vectorstore đã sẵn sàng.")
+    try:
+        vectorstore.save_local(str(index_path))
+        print("💾 Đã lưu FAISS index cache.")
+    except Exception:
+        pass
     return vectorstore
